@@ -1,0 +1,30 @@
+name: push-notion
+
+on:
+  repository_dispatch:
+    types: [rates_updated]
+  workflow_dispatch:
+
+jobs:
+  push:
+    runs-on: ubuntu-latest
+    env:
+      NOTION_API_TOKEN: ${{ secrets.NOTION_API_TOKEN }}
+      NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
+      # Default fallback (overridden by repository_dispatch payload if present)
+      RATES_JSON_URL: https://taylorsudo.github.io/rba-aud-rates/rates-latest.json
+      # Only push USD by default; later you can set this to "USD,EUR,JPY"
+      CURRENCY_FILTER: USD
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Prefer payload URL if provided
+        run: |
+          # Accept URL from Repo A dispatch payload
+          if [ -n "${{ github.event.client_payload.rates_url }}" ]; then
+            echo "RATES_JSON_URL=${{ github.event.client_payload.rates_url }}" >> $GITHUB_ENV
+          fi
+
+      - name: Push to Notion
+        run: |
+          python3 scripts/push_to_notion.py
