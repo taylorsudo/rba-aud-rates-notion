@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       NOTION_API_TOKEN: ${{ secrets.NOTION_API_TOKEN }}
-      NOTION_LATEST_DATABASE_ID: ${{ secrets.NOTION_LATEST_DATABASE_ID }}
+      NOTION_DATABASE_ID: ${{ secrets.NOTION_DATABASE_ID }}
       # Defaults (overridden by dispatch payload if present)
       PAGES_RATES_URL: https://taylorsudo.github.io/rba-aud-rates/rates-latest.json
       RAW_RATES_URL: https://raw.githubusercontent.com/taylorsudo/rba-aud-rates/main/public/rates-latest.json
