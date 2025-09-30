@@ -11,7 +11,8 @@ FILTER = os.environ.get("CURRENCY_FILTER")  # e.g., "USD,EUR,JPY"
 
 NOTION_VER = "2022-06-28"
 
-def _read_json(resp): return json.loads(resp.read().decode("utf-8"))
+def _read_json(resp):
+    return json.loads(resp.read().decode("utf-8"))
 
 def http_json(method, url, payload=None, extra_headers=None):
     data = None if payload is None else json.dumps(payload).encode("utf-8")
@@ -20,16 +21,19 @@ def http_json(method, url, payload=None, extra_headers=None):
     req.add_header("Notion-Version", NOTION_VER)
     req.add_header("Content-Type", "application/json")
     if extra_headers:
-        for k,v in extra_headers.items(): req.add_header(k,v)
+        for k, v in extra_headers.items():
+            req.add_header(k, v)
     try:
         with urllib.request.urlopen(req, timeout=30) as r:
             return _read_json(r)
     except HTTPError as e:
         body = e.read().decode("utf-8", errors="ignore")
-        print(f"[Notion] HTTPError {e.code} {url}\nPayload: {json.dumps(payload, ensure_ascii=False)}\nResponse: {body}")
+        print(f"[Notion] HTTPError {e.code} on {url}")
+        print(f"[Notion] Request payload: {json.dumps(payload, ensure_ascii=False)}")
+        print(f"[Notion] Response body: {body}")
         raise
     except URLError as e:
-        print(f"[Notion] URLError {url}: {e}")
+        print(f"[Notion] URLError on {url}: {e}")
         raise
 
 def fetch_json(url):
@@ -45,22 +49,23 @@ def get_latest_rates():
                 return fetch_json(url)
             except Exception as e:
                 last_err = e
-                time.sleep(0.5*(attempt+1))
+                time.sleep(0.5 * (attempt + 1))
     raise last_err
 
 def get_db_schema(db_id):
     return http_json("GET", f"https://api.notion.com/v1/databases/{db_id}")
 
-def _norm(s): return "".join(ch.lower() for ch in s if ch.isalnum())  # case/space/punct-insensitive
+def _norm(s):
+    return "".join(ch.lower() for ch in s if ch.isalnum())
 
 def resolve_props(schema):
     """
-    Detect actual property names by type and by fuzzy name:
-      - title_name: the title prop (required)
-      - currency_name: 'Currency' select if present, else None
-      - updated_name: date prop whose name ~ 'updated'
-      - aud_per_unit_name: number prop whose name ~ 'audperunit'
-      - per_aud_name: number prop whose name ~ 'peraud'
+    Detect actual property names by type/name, and return a mapping:
+      title_name            -> Title property name
+      currency_name         -> 'Currency' Select name if present (else None)
+      updated_name          -> Date property for Updated
+      aud_per_unit_name     -> Number property that matches 'aud per unit' (case/space-insensitive)
+      per_aud_name          -> Number property that matches 'per aud'
     """
     props = schema.get("properties", {})
     title_name = None
@@ -69,6 +74,7 @@ def resolve_props(schema):
     aud_per_unit_name = None
     per_aud_name = None
 
+    # First pass: find by type and fuzzy name
     for name, meta in props.items():
         ptype = meta.get("type")
         n = _norm(name)
@@ -79,34 +85,31 @@ def resolve_props(schema):
         if ptype == "date" and (n == "updated" or "updated" in n):
             updated_name = name
         if ptype == "number":
-            if n in ("audperunit","audper1unit","aud1unit") or ("audperunit" in n):
+            if n == "audperunit" or "audperunit" in n:
                 aud_per_unit_name = name
-            elif n in ("peraud","per1aud") or ("peraud" in n):
+            elif n == "peraud" or "peraud" in n:
                 per_aud_name = name
 
-    # Reasonable fallbacks if fuzzy match failed
+    # Fallbacks
     if not updated_name:
-        # pick any date prop if exactly one exists
-        date_props = [n for n,m in props.items() if m.get("type")=="date"]
-        if len(date_props)==1: updated_name = date_props[0]
+        date_props = [n for n, m in props.items() if m.get("type") == "date"]
+        if len(date_props) == 1:
+            updated_name = date_props[0]
 
     if not title_name:
-        raise RuntimeError("Could not find Title property in the Notion database.")
+        raise RuntimeError("No Title property found in the Notion database.")
 
-    # Ensure required numbers exist
     if not aud_per_unit_name or not per_aud_name:
         raise RuntimeError(
-            f"Could not resolve number fields. Found: "
-            f"aud_per_unit={aud_per_unit_name}, per_aud={per_aud_name}. "
-            f"Make sure your Number properties are named like 'AUD per unit' and 'Per AUD'."
+            "Could not resolve Number fields. Ensure your DB has Number properties "
+            "named like 'AUD per unit' and 'Per AUD' (case/spacing doesn't matter)."
         )
-
     if not updated_name:
-        raise RuntimeError("Could not resolve the 'Updated' Date property. Ensure a Date property exists (e.g., 'Updated').")
+        raise RuntimeError("Could not resolve the 'Updated' Date property. Add a Date property named 'Updated'.")
 
     return {
         "title_name": title_name,
-        "currency_name": currency_name,   # may be None; we’ll fallback to Title filter
+        "currency_name": currency_name,   # may be None
         "updated_name": updated_name,
         "aud_per_unit_name": aud_per_unit_name,
         "per_aud_name": per_aud_name,
@@ -152,8 +155,8 @@ def main():
     schema = get_db_schema(LATEST_DB_ID)
     names = resolve_props(schema)
 
-    print(f"[Info] Using properties -> Title: {names['title_name']}, Currency: {names['currency_name']}, "
-          f"Updated: {names['updated_name']}, AUD per unit: {names['aud_per_unit_name']}, Per AUD: {names['per_aud_name']}")
+    print(f"[Info] Using props -> Title:{names['title_name']} Currency:{names['currency_name']} "
+          f"Updated:{names['updated_name']} AUD per unit:{names['aud_per_unit_name']} Per AUD:{names['per_aud_name']}")
 
     pushed = 0
     for r in rates:
@@ -162,13 +165,12 @@ def main():
             continue
 
         per_aud = float(r["per_aud"])
-        aud_per_unit = r.get("aud_per_unit")
-        if aud_per_unit is None and per_aud != 0:
-            aud_per_unit = 1.0 / per_aud
-        aud_per_unit = float(aud_per_unit)
+        apu = r.get("aud_per_unit")
+        if apu is None and per_aud != 0:
+            apu = 1.0 / per_aud
+        apu = float(apu)
 
-        props = make_props(names, date_iso, code, aud_per_unit, per_aud)
-
+        props = make_props(names, date_iso, code, apu, per_aud)
         page_id = find_row(LATEST_DB_ID, names["title_name"], names["currency_name"], code)
         if page_id:
             update_page(page_id, props)
